@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Intercom</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --bg: #0a0c0f;
+    --panel: #111419;
+    --border: #1e2530;
+    --green: #00ff88;
+    --green-dim: #00ff8844;
+    --green-glow: #00ff8822;
+    --red: #ff3355;
+    --red-dim: #ff335544;
+    --amber: #ffaa00;
+    --text: #c8d8e8;
+    --text-dim: #4a5a6a;
+    --screw: #1a2030;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+    touch-action: none;
+  }
+
+  /* Noise overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 1000; opacity: 0.4;
+  }
+
+  .device {
+    width: min(360px, 92vw);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 24px 32px;
+    position: relative;
+    box-shadow:
+      0 0 0 1px #ffffff08,
+      0 20px 60px #00000088,
+      inset 0 1px 0 #ffffff0a;
+  }
+
+  /* Corner screws */
+  .screw {
+    position: absolute;
+    width: 10px; height: 10px;
+    background: var(--screw);
+    border-radius: 50%;
+    border: 1px solid #2a3545;
+    box-shadow: inset 0 1px 2px #00000088;
+  }
+  .screw::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 60%; height: 1px;
+    background: #0a1020;
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+  .screw.tl { top: 10px; left: 10px; }
+  .screw.tr { top: 10px; right: 10px; }
+  .screw.bl { bottom: 10px; left: 10px; }
+  .screw.br { bottom: 10px; right: 10px; }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  .brand {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    color: var(--text-dim);
+    text-transform: uppercase;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.15em;
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .status-dot.ready {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 2s ease-in-out infinite;
+  }
+  .status-dot.recording {
+    background: var(--red);
+    box-shadow: 0 0 8px var(--red);
+  }
+  .status-dot.playing {
+    background: var(--amber);
+    box-shadow: 0 0 8px var(--amber);
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* VU Meter / Waveform display */
+  .display {
+    background: #07090c;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 80px;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: inset 0 2px 8px #00000066;
+  }
+
+  .display::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      #ffffff03 3px,
+      #ffffff03 4px
+    );
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  canvas#waveform {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  .display-label {
+    position: absolute;
+    bottom: 6px; right: 8px;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    z-index: 3;
+  }
+
+  /* Level bars */
+  .level-section {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 20px;
+    align-items: flex-end;
+    height: 24px;
+  }
+
+  .level-bar {
+    flex: 1;
+    background: var(--border);
+    border-radius: 2px;
+    transition: height 0.05s, background 0.05s;
+    height: 4px;
+    min-height: 4px;
+  }
+
+  /* Info panel */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+
+  .info-cell {
+    background: #0d1018;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+
+  .info-label {
+    font-size: 8px;
+    color: var(--text-dim);
+    letter-spacing: 0.2em;
+    margin-bottom: 3px;
+  }
+
+  .info-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 0.05em;
+  }
+  .info-value.neutral { color: var(--text); }
+  .info-value.recording { color: var(--red); }
+  .info-value.playing { color: var(--amber); }
+
+  /* PTT Button */
+  .ptt-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ptt-outer {
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, var(--border), #2a3545, var(--border));
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    box-shadow:
+      0 4px 20px #00000066,
+      inset 0 1px 0 #ffffff0a;
+  }
+
+  .ptt-ring {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .ptt-btn {
+    width: 110px; height: 110px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    background: radial-gradient(circle at 40% 35%, #1e2a3a, #0d1118);
+    box-shadow:
+      0 6px 20px #00000077,
+      0 0 0 1px #2a3545,
+      inset 0 1px 0 #ffffff12,
+      inset 0 -2px 4px #00000055;
+    transition: transform 0.08s, box-shadow 0.08s;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
+
+  .ptt-btn:active, .ptt-btn.pressed {
+    transform: scale(0.95) translateY(2px);
+    box-shadow:
+      0 2px 8px #00000077,
+      0 0 0 1px #2a3545,
+      inset 0 2px 4px #00000088;
+  }
+
+  .ptt-btn.recording {
+    background: radial-gradient(circle at 40% 35%, #2a1020, #1a0810);
+    box-shadow:
+      0 4px 15px #ff335544,
+      0 0 30px #ff335522,
+      0 0 0 1px var(--red-dim),
+      inset 0 1px 0 #ff335522,
+      inset 0 -2px 4px #00000055;
+  }
+
+  .ptt-btn.playing {
+    background: radial-gradient(circle at 40% 35%, #1a1400, #100c00);
+    box-shadow:
+      0 4px 15px #ffaa0044,
+      0 0 0 1px #ffaa0044,
+      inset 0 1px 0 #ffaa0022,
+      inset 0 -2px 4px #00000055;
+  }
+
+  .ptt-icon {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex; flex-direction: column;
+    align-items: center; gap: 6px;
+  }
+
+  .mic-icon svg {
+    width: 36px; height: 36px;
+    transition: opacity 0.2s;
+  }
+
+  .ptt-label-text {
+    font-family: 'Orbitron', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.25em;
+    color: var(--text-dim);
+    transition: color 0.2s;
+  }
+
+  .ptt-btn.recording .ptt-label-text { color: var(--red); }
+  .ptt-btn.playing .ptt-label-text { color: var(--amber); }
+
+  .ptt-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.15em;
+    text-align: center;
+  }
+
+  /* Recording ring pulse */
+  .recording-ring {
+    position: absolute; inset: -8px;
+    border-radius: 50%;
+    border: 2px solid var(--red);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .ptt-btn.recording ~ .ptt-outer .recording-ring,
+  .recording-active .recording-ring {
+    animation: ring-pulse 1s ease-out infinite;
+  }
+
+  @keyframes ring-pulse {
+    0% { transform: scale(1); opacity: 0.8; }
+    100% { transform: scale(1.3); opacity: 0; }
+  }
+
+  /* Permission error */
+  .error-msg {
+    display: none;
+    background: #1a0810;
+    border: 1px solid var(--red-dim);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 10px;
+    color: var(--red);
+    letter-spacing: 0.1em;
+    text-align: center;
+    margin-top: 12px;
+    line-height: 1.6;
+  }
+  .error-msg.visible { display: block; }
+
+  /* Ripple on playing */
+  @keyframes ripple {
+    0% { transform: scale(1); opacity: 0.6; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  .play-ripple {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    border: 1px solid var(--amber);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .ptt-btn.playing .play-ripple {
+    animation: ripple 1.2s ease-out infinite;
+  }
+  .ptt-btn.playing .play-ripple:nth-child(2) { animation-delay: 0.4s; }
+  .ptt-btn.playing .play-ripple:nth-child(3) { animation-delay: 0.8s; }
+</style>
+</head>
+<body>
+
+<div class="device">
+  <div class="screw tl"></div>
+  <div class="screw tr"></div>
+  <div class="screw bl"></div>
+  <div class="screw br"></div>
+
+  <div class="header">
+    <div class="brand">Intercom</div>
+    <div class="status-row">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">INIT</span>
+    </div>
+  </div>
+
+  <div class="display">
+    <canvas id="waveform"></canvas>
+    <div class="display-label">AUDIO MONITOR</div>
+  </div>
+
+  <div class="level-section" id="levelBars"></div>
+
+  <div class="info-grid">
+    <div class="info-cell">
+      <div class="info-label">MODE</div>
+      <div class="info-value neutral" id="modeVal">STANDBY</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">DURATION</div>
+      <div class="info-value neutral" id="durationVal">0.0s</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">LEVEL</div>
+      <div class="info-value neutral" id="levelVal">— dB</div>
+    </div>
+    <div class="info-cell">
+      <div class="info-label">OUTPUT</div>
+      <div class="info-value neutral" id="outputVal">DEVICE</div>
+    </div>
+  </div>
+
+  <div class="ptt-wrap">
+    <div class="ptt-outer" id="pttOuter">
+      <div class="recording-ring" id="recordingRing"></div>
+      <button class="ptt-btn" id="pttBtn"
+              onmousedown="startLive(event)"
+              onmouseup="stopLive(event)"
+              onmouseleave="stopLive(event)"
+              ontouchstart="startLive(event)"
+              ontouchend="stopLive(event)"
+              ontouchcancel="stopLive(event)">
+        <div class="play-ripple"></div>
+        <div class="play-ripple"></div>
+        <div class="play-ripple"></div>
+        <div class="ptt-icon">
+          <div class="mic-icon" id="micIcon">
+            <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="13" y="4" width="10" height="18" rx="5" fill="#c8d8e8" id="micBody"/>
+              <path d="M8 18c0 5.523 4.477 10 10 10s10-4.477 10-10" stroke="#c8d8e8" stroke-width="2" stroke-linecap="round" id="micArc"/>
+              <line x1="18" y1="28" x2="18" y2="32" stroke="#c8d8e8" stroke-width="2" stroke-linecap="round" id="micStand"/>
+              <line x1="14" y1="32" x2="22" y2="32" stroke="#c8d8e8" stroke-width="2" stroke-linecap="round" id="micBase"/>
+            </svg>
+          </div>
+          <div class="ptt-label-text" id="pttLabel">PUSH TO TALK</div>
+        </div>
+      </button>
+    </div>
+    <div class="ptt-hint" id="pttHint">Hold to record · Release to transmit</div>
+    <div class="error-msg" id="errorMsg"></div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let audioContext  = null;   // created on first button press (user gesture)
+let micStream     = null;   // MediaStream from getUserMedia
+let micSource     = null;   // MediaStreamAudioSourceNode
+let analyser      = null;   // AnalyserNode for visualisation
+let gainNode      = null;   // GainNode (mic → destination live pass-through)
+let isLive        = false;  // true while button is held
+let startTime     = 0;
+let durationInterval = null;
+let animFrameId   = null;
+let waveformData  = [];
+const MAX_WAVE_PTS = 200;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────
+const pttBtn      = document.getElementById('pttBtn');
+const statusDot   = document.getElementById('statusDot');
+const statusText  = document.getElementById('statusText');
+const modeVal     = document.getElementById('modeVal');
+const durationVal = document.getElementById('durationVal');
+const levelVal    = document.getElementById('levelVal');
+const outputVal   = document.getElementById('outputVal');
+const pttLabel    = document.getElementById('pttLabel');
+const pttHint     = document.getElementById('pttHint');
+const errorMsg    = document.getElementById('errorMsg');
+const canvas      = document.getElementById('waveform');
+const ctx         = canvas.getContext('2d');
+const levelSection= document.getElementById('levelBars');
+
+// ── Level bars ─────────────────────────────────────────────────────────────
+const NUM_BARS = 32;
+const bars = [];
+for (let i = 0; i < NUM_BARS; i++) {
+  const b = document.createElement('div');
+  b.className = 'level-bar';
+  levelSection.appendChild(b);
+  bars.push(b);
+}
+
+// ── Canvas resize ─────────────────────────────────────────────────────────
+function resizeCanvas() {
+  canvas.width  = canvas.offsetWidth  * window.devicePixelRatio;
+  canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// ── Status helper ─────────────────────────────────────────────────────────
+function setStatus(state) {
+  statusDot.className = 'status-dot ' + state;
+  const labels      = { init:'INIT', ready:'READY', live:'TX', error:'ERROR' };
+  const modeLabels  = { init:'INIT', ready:'STANDBY', live:'LIVE', error:'ERROR' };
+  const modeClasses = { init:'neutral', ready:'neutral', live:'recording', error:'recording' };
+  statusText.textContent = labels[state]      || state.toUpperCase();
+  modeVal.textContent    = modeLabels[state]  || state.toUpperCase();
+  modeVal.className      = 'info-value ' + (modeClasses[state] || 'neutral');
+}
+
+// ── Draw waveform ─────────────────────────────────────────────────────────
+function drawWaveform(color) {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (waveformData.length < 2) {
+    ctx.beginPath();
+    ctx.strokeStyle = '#1e2530';
+    ctx.lineWidth = 1.5 * devicePixelRatio;
+    ctx.moveTo(0, H/2); ctx.lineTo(W, H/2);
+    ctx.stroke();
+    return;
+  }
+  const mid = H / 2;
+  const step = W / (MAX_WAVE_PTS - 1);
+  // Glow pass
+  ctx.save();
+  ctx.filter = `blur(${3 * devicePixelRatio}px)`;
+  ctx.beginPath();
+  ctx.strokeStyle = color + '55';
+  ctx.lineWidth = 2 * devicePixelRatio;
+  for (let i = 0; i < waveformData.length; i++) {
+    const x = i * step, y = mid - waveformData[i] * mid * 0.85;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+  // Main line
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5 * devicePixelRatio;
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < waveformData.length; i++) {
+    const x = i * step, y = mid - waveformData[i] * mid * 0.85;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+// ── Analyser loop ─────────────────────────────────────────────────────────
+function startAnalyserLoop() {
+  if (!analyser) return;
+  const bufLen  = analyser.frequencyBinCount;
+  const timeArr = new Uint8Array(bufLen);
+  const freqArr = new Uint8Array(bufLen);
+  function loop() {
+    animFrameId = requestAnimationFrame(loop);
+    analyser.getByteTimeDomainData(timeArr);
+    analyser.getByteFrequencyData(freqArr);
+    // Waveform
+    const sample = (timeArr[Math.floor(bufLen/2)] - 128) / 128;
+    waveformData.push(sample);
+    if (waveformData.length > MAX_WAVE_PTS) waveformData.shift();
+    drawWaveform('#ff3355');
+    // Level bars
+    const sliceSize = Math.floor(bufLen / NUM_BARS);
+    let rmsTotal = 0;
+    for (let i = 0; i < NUM_BARS; i++) {
+      let sum = 0;
+      for (let j = 0; j < sliceSize; j++) sum += freqArr[i * sliceSize + j];
+      const avg = sum / sliceSize / 255;
+      bars[i].style.height = Math.max(4, avg * 24) + 'px';
+      bars[i].style.background = avg > 0.6
+        ? `hsl(${140 - avg*100}, 100%, 55%)`
+        : avg > 0.08 ? 'var(--green)' : 'var(--border)';
+      rmsTotal += avg * avg;
+    }
+    const rms = Math.sqrt(rmsTotal / NUM_BARS);
+    const db  = rms > 0 ? Math.round(20 * Math.log10(rms)) : -Infinity;
+    levelVal.textContent = isFinite(db) ? db + ' dB' : '—  dB';
+    levelVal.className   = 'info-value recording';
+  }
+  loop();
+}
+
+function stopAnalyserLoop() {
+  if (animFrameId) cancelAnimationFrame(animFrameId);
+  animFrameId = null;
+  waveformData = [];
+  drawWaveform('#1e2530');
+  bars.forEach(b => { b.style.height = '4px'; b.style.background = 'var(--border)'; });
+  levelVal.textContent = '— dB';
+  levelVal.className   = 'info-value neutral';
+}
+
+// ── Timer ─────────────────────────────────────────────────────────────────
+function startTimer() {
+  startTime = Date.now();
+  durationInterval = setInterval(() => {
+    durationVal.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+  }, 100);
+}
+function stopTimer() {
+  clearInterval(durationInterval);
+  durationVal.textContent = '0.0s';
+}
+
+// ── Error ─────────────────────────────────────────────────────────────────
+function showError(msg) {
+  errorMsg.textContent = msg;
+  errorMsg.classList.add('visible');
+  setStatus('error');
+}
+
+// ── Live pass-through: START ───────────────────────────────────────────────
+// Must be called synchronously inside a touchstart/mousedown handler so that
+// iOS Safari treats it as a user gesture for both AudioContext and getUserMedia.
+async function startLive(e) {
+  if (e) e.preventDefault();
+  if (isLive) return;
+  errorMsg.classList.remove('visible');
+
+  try {
+    // 1. Create / resume AudioContext inside the user gesture
+    if (!audioContext || audioContext.state === 'closed') {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    // 2. Get mic — also inside the gesture so iOS allows it
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,  // avoid the browser mangling your voice
+        noiseSuppression: false,
+        autoGainControl:  false,
+      },
+      video: false
+    });
+
+    // 3. Wire: mic → analyser → gain → speakers
+    micSource = audioContext.createMediaStreamSource(micStream);
+    analyser  = audioContext.createAnalyser();
+    gainNode  = audioContext.createGain();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.75;
+    gainNode.gain.value = 1.0;
+
+    micSource.connect(analyser);
+    analyser.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    isLive = true;
+    pttBtn.classList.add('recording');
+    pttLabel.textContent = 'TRANSMITTING';
+    pttHint.textContent  = 'Release to stop';
+    setStatus('live');
+    startTimer();
+    startAnalyserLoop();
+    document.getElementById('recordingRing').style.animation = 'ring-pulse 1s ease-out infinite';
+
+  } catch(err) {
+    isLive = false;
+    let msg;
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      msg = 'Microphone access denied. Please allow microphone permission in your browser settings and try again.';
+    } else if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      msg = 'Your browser does not support microphone access. Try opening this page over HTTPS, or use Chrome/Firefox.';
+    } else {
+      msg = 'Could not start audio: ' + (err.message || err.name || String(err));
+    }
+    showError(msg);
+    setStatus('error');
+  }
+}
+
+// ── Live pass-through: STOP ────────────────────────────────────────────────
+function stopLive(e) {
+  if (e) e.preventDefault();
+  if (!isLive) return;
+  isLive = false;
+
+  // Disconnect graph
+  try { gainNode  && gainNode.disconnect();   } catch(_) {}
+  try { analyser  && analyser.disconnect();   } catch(_) {}
+  try { micSource && micSource.disconnect();  } catch(_) {}
+  gainNode = analyser = micSource = null;
+
+  // Stop mic tracks
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }
+
+  stopAnalyserLoop();
+  stopTimer();
+  pttBtn.classList.remove('recording');
+  document.getElementById('recordingRing').style.animation = '';
+  pttLabel.textContent = 'PUSH TO TALK';
+  pttHint.textContent  = 'Hold to transmit · Release to stop';
+  setStatus('ready');
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+setStatus('ready');
+drawWaveform('#1e2530');
+outputVal.textContent = 'DEVICE';
+
+// Update hint to match new live behaviour
+pttHint.textContent = 'Hold to transmit · Release to stop';
+
+// Attach events (inline handlers on the button handle the core gesture;
+// these document-level listeners catch mouseup/touchend outside the button)
+document.addEventListener('mouseup',     () => stopLive());
+document.addEventListener('touchend',    (e) => stopLive(e));
+document.addEventListener('touchcancel', (e) => stopLive(e));
+</script>
+</body>
+</html>
